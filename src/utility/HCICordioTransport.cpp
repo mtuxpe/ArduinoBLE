@@ -21,7 +21,6 @@
 
 #include <Arduino.h>
 #include <mbed.h>
-
 #include <driver/CordioHCITransportDriver.h>
 #include <driver/CordioHCIDriver.h>
 
@@ -52,6 +51,8 @@
 #else
 #define BLE_NAMESPACE ble::vendor::cordio
 #endif
+
+
 
 extern BLE_NAMESPACE::CordioHCIDriver& ble_cordio_get_hci_driver();
 
@@ -113,17 +114,39 @@ extern "C" void wsf_mbed_ble_signal_event(void)
 
 static void bleLoop()
 {
+#if MBED_MAJOR_VERSION >= 6
+	namespace chrono = std::chrono;
+#endif
 #if CORDIO_ZERO_COPY_HCI
-    uint64_t last_update_us = 0;
-    mbed::LowPowerTimer timer;
 
-    timer.start();
+
+#if MBED_MAJOR_VERSION >= 6
+
+    auto last_update_us = 0;
+	auto last_update_ms =0;
+	auto wait_time_us =0;
+	auto wait_time_ms =0;
+    mbed::Timer timer;
+#else
+	uint64_t last_update_us = 0;
+	mbed::LowPowerTimer timer;
+#endif
+	timer.start();
 
     while (true) {
-        last_update_us += (uint64_t) timer.read_high_resolution_us();
+		
+#if MBED_MAJOR_VERSION >= 6
+		last_update_us += chrono::duration_cast<chrono::microseconds>(timer.elapsed_time()).count();
+#else
+		last_update_us += (uint64_t) timer.read_high_resolution_us()
+#endif
+ 
         timer.reset();
-
-        uint64_t last_update_ms = (last_update_us / 1000);
+#if MBED_MAJOR_VERSION >= 6
+        last_update_ms = (last_update_us / 1000);
+#else
+		uint64_t last_update_ms = (last_update_us / 1000);
+#endif
         wsfTimerTicks_t wsf_ticks = (last_update_ms / WSF_MS_PER_TICK);
 
         if (wsf_ticks > 0) {
@@ -142,18 +165,36 @@ static void bleLoop()
             }
         }
 
-        uint64_t time_spent = (uint64_t) timer.read_high_resolution_us();
+
+#if MBED_MAJOR_VERSION >= 6
+        auto time_spent = chrono::duration_cast<chrono::microseconds>(timer.elapsed_time()).count();
+#else
+		uint64_t time_spent = (uint64_t) timer.read_high_resolution_us();
+#endif	
 
         /* don't bother sleeping if we're already past tick */
         if (sleep && (WSF_MS_PER_TICK * 1000 > time_spent)) {
             /* sleep to maintain constant tick rate */
+#if MBED_MAJOR_VERSION >= 6
+            wait_time_us = WSF_MS_PER_TICK * 1000 - time_spent;
+            wait_time_ms = wait_time_us / 1000;
+
+#else
             uint64_t wait_time_us = WSF_MS_PER_TICK * 1000 - time_spent;
-            uint64_t wait_time_ms = wait_time_us / 1000;
+            uint64_t wait_time_ms = wait_time_us / 1000	
+#endif
+
+            wait_time_us = WSF_MS_PER_TICK * 1000 - time_spent;
+            wait_time_ms = wait_time_us / 1000;
 
             wait_time_us = wait_time_us % 1000;
 
             if (wait_time_ms) {
-              rtos::ThisThread::sleep_for(wait_time_ms);
+#if MBED_MAJOR_VERSION >= 6
+				rtos::ThisThread::sleep_for(chrono::milliseconds(wait_time_ms));
+#else
+				 rtos::ThisThread::sleep_for(wait_time_ms);
+#endif
             }
 
             if (wait_time_us) {
@@ -163,7 +204,13 @@ static void bleLoop()
     }
 #else
     while(true) {
-        rtos::ThisThread::sleep_for(osWaitForever);
+
+#if MBED_MAJOR_VERSION >= 6
+		rtos::ThisThread::sleep_for(chrono::milliseconds(osWaitForever));
+#else
+		rtos::ThisThread::sleep_for(osWaitForever);
+#endif
+
     }
 #endif // CORDIO_ZERO_COPY_HCI
 }
